@@ -55,7 +55,25 @@ jobs:
       - name: 创建必要目录
         run: |
           mkdir -p data logs reports
-      
+
+      - name: 设置.env 文件
+        run: |
+          echo "🔄 从外部 API 获取股票列表..."
+          stock_output=$(python scripts/setup_stock_list.py)
+          # 提取 STOCK_LIST 值并输出到 GITHUB_ENV
+          stock_list=$(echo "$stock_output" | grep "^STOCK_LIST=" | head -1 | cut -d'=' -f2-)
+          if [ -n "$stock_list" ]; then
+            echo "✅ 获取到 $(( $(echo "$stock_list" | tr ',' '\n' | wc -l) )) 只股票"
+            echo "STOCK_LIST=$stock_list" >> $GITHUB_ENV
+          else
+            echo "⚠️ 未获取到股票列表，使用默认配置"
+            echo "STOCK_LIST=" >> $GITHUB_ENV
+          fi
+
+      - name: 显示股票列表
+        run: |
+          echo "📊 本次分析股票列表：${{ env.STOCK_LIST }}"   
+
       - name: 执行股票分析
         env:
           # ==========================================
@@ -174,7 +192,7 @@ jobs:
           # ==========================================
           # 自选股配置
           # ==========================================
-          STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST || '600519' }}
+          STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST || env.STOCK_LIST || '600519' }}
           MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'cn' }}
           
           # ==========================================
