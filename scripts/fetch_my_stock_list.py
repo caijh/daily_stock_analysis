@@ -46,7 +46,7 @@ class ConfigExt:
                         continue
                     if strategy_type not in ['LONG']:
                         continue
-                    if exchange not in ['SSE', 'SZSE', 'HKEX']:
+                    if exchange not in ['SSE', 'SZSE']:
                         continue
 
                     # Transform stock code based on exchange

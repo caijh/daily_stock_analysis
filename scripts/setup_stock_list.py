@@ -64,8 +64,8 @@ def main():
         return
 
     # stocks只取前10
-    if len(stocks) > 20:
-        stocks = stocks[:20]
+    if len(stocks) > 10:
+        stocks = stocks[:10]
 
     # Update .env file
     env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
