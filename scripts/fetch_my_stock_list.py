@@ -48,6 +48,9 @@ class ConfigExt:
                         continue
                     if exchange not in ['SSE', 'SZSE']:
                         continue
+                    entry_price = item.get('entry_price', 0)
+                    if entry_price <= 0 or entry_price > 30:
+                         continue
 
                     # Transform stock code based on exchange
                     transformed_code = cls._transform_stock_code(stock_code, exchange)
