@@ -51,6 +51,8 @@ Requirements:
 """
             if report_language == "en":
                 return prompt + "\nAlways answer in English.\n"
+            if report_language == "ko":
+                return prompt + "\n항상 한국어로 답변하세요.\n"
             return prompt + "\n默认使用中文回答。\n"
 
         skills = ""
@@ -138,6 +140,14 @@ should sum to 100; all-zero means no effective signal and must not be faked.
 - `decision_type` must remain `buy|hold|sell`.
 - Write all human-readable JSON values in English.
 """
+        if report_language == "ko":
+            return prompt + """
+
+## Output Language
+- Keep every JSON key unchanged.
+- `decision_type` must remain `buy|hold|sell`.
+- Write all human-readable JSON values in Korean (한국어).
+"""
         return prompt + """
 
 ## 输出语言
@@ -183,6 +193,12 @@ should sum to 100; all-zero means no effective signal and must not be faked.
             parts.append("## Risk Flags")
             for rf in ctx.risk_flags:
                 parts.append(f"- [{rf.get('severity', 'medium')}] {rf.get('category', '')}: {rf.get('description', '')}")
+            parts.append("")
+
+        disagreement_summary = ctx.meta.get("agent_disagreement_summary")
+        if isinstance(disagreement_summary, dict) and disagreement_summary:
+            parts.append("## Agent Disagreement Summary")
+            parts.append(json.dumps(disagreement_summary, ensure_ascii=False, default=str))
             parts.append("")
 
         # Skill meta

@@ -26,7 +26,6 @@ from src.report_language import (
     is_chip_structure_unavailable,
     localize_bias_status,
     localize_chip_health,
-    localize_operation_advice,
     localize_trend_prediction,
     normalize_report_language,
 )
@@ -36,7 +35,12 @@ from src.market_phase_summary import (
     extract_market_phase_summary,
     rebuild_market_phase_summary_for_stock_code,
 )
-from src.schemas.decision_action import build_action_fields
+from src.schemas.decision_action import (
+    display_action_fields,
+    display_action_fields_for_result,
+    display_operation_advice_for_result,
+)
+from src.schemas.decision_scale import extract_decision_guardrail_reason
 from src.utils.sniper_points import find_sniper_points
 from src.utils.data_processing import (
     extract_realtime_detail_fields,
@@ -76,6 +80,13 @@ class HistoryService:
             db_manager: Database manager (optional, defaults to singleton instance)
         """
         self.db = db_manager or DatabaseManager.get_instance()
+
+    @staticmethod
+    def _serialize_created_at(value: Optional[datetime]) -> Optional[str]:
+        """Serialize stored server-local timestamps with an explicit offset."""
+        if value is None:
+            return None
+        return value.astimezone().isoformat()
 
     @staticmethod
     def _history_code_filter_candidates(stock_code: str) -> List[str]:
@@ -221,7 +232,7 @@ class HistoryService:
             
         except Exception as e:
             logger.error(f"查询历史列表失败: {e}", exc_info=True)
-            return {"total": 0, "items": []}
+            raise
 
     @staticmethod
     def _safe_float(value: Any) -> Optional[float]:
@@ -316,7 +327,7 @@ class HistoryService:
             "action": action_fields["action"],
             "action_label": action_fields["action_label"],
             "model_used": normalize_model_used(model_used),
-            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "created_at": self._serialize_created_at(record.created_at),
             "market_phase_summary": market_phase_summary,
             **market_fields,
         }
@@ -566,7 +577,7 @@ class HistoryService:
             "storage_stock_code": str(record.code or "").strip(),
             "stock_name": record.name,
             "report_type": record.report_type,
-            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "created_at": self._serialize_created_at(record.created_at),
             "model_used": model_used,
             "analysis_summary": market_review_content or record.analysis_summary,
             "operation_advice": record.operation_advice,
@@ -587,11 +598,14 @@ class HistoryService:
 
     def _decision_action_fields_for_record(self, record, raw_result: Any) -> Dict[str, Any]:
         raw = raw_result if isinstance(raw_result, dict) else {}
-        return build_action_fields(
+        return display_action_fields(
             operation_advice=raw.get("operation_advice") or getattr(record, "operation_advice", None),
             explicit_action=raw.get("action"),
+            action_label=raw.get("action_label"),
             report_type=getattr(record, "report_type", None),
             report_language=normalize_report_language(raw.get("report_language")),
+            sentiment_score=getattr(record, "sentiment_score", None),
+            guardrail_reason=extract_decision_guardrail_reason(raw),
         )
 
     def delete_history_records(self, record_ids: List[int]) -> int:
@@ -832,7 +846,7 @@ class HistoryService:
             dashboard = raw_result.get("dashboard", {})
 
             # Build AnalysisResult with available data
-            return AnalysisResult(
+            result = AnalysisResult(
                 code=raw_result.get("code", record.code),
                 name=raw_result.get("name", record.name),
                 sentiment_score=raw_result.get("sentiment_score", record.sentiment_score or 50),
@@ -870,6 +884,10 @@ class HistoryService:
                 change_pct=raw_result.get("change_pct"),
                 model_used=raw_result.get("model_used"),
             )
+            guardrail_reason = extract_decision_guardrail_reason(raw_result)
+            if guardrail_reason:
+                setattr(result, "guardrail_reason", guardrail_reason)
+            return result
         except Exception as e:
             logger.error(f"Failed to rebuild AnalysisResult: {e}", exc_info=True)
             return None
@@ -896,14 +914,22 @@ class HistoryService:
         report_time = record.created_at.strftime("%H:%M:%S") if record.created_at else datetime.now().strftime("%H:%M:%S")
         report_language = normalize_report_language(getattr(result, "report_language", "zh"))
         labels = get_report_labels(report_language)
-        analysis_date_label = "Analysis Date" if report_language == "en" else "分析日期"
-        report_time_label = "Report Time" if report_language == "en" else "报告生成时间"
-        reason_label = "Rationale" if report_language == "en" else "操作理由"
-        risk_warning_label = "Risk Warning" if report_language == "en" else "风险提示"
-        technical_heading = "Technicals" if report_language == "en" else "技术面"
-        ma_label = "Moving Averages" if report_language == "en" else "均线"
-        volume_analysis_label = "Volume" if report_language == "en" else "量能"
-        news_heading = "News Flow" if report_language == "en" else "消息面"
+
+        def _label(en: str, zh: str, ko: str) -> str:
+            if report_language == "en":
+                return en
+            if report_language == "ko":
+                return ko
+            return zh
+
+        analysis_date_label = _label("Analysis Date", "分析日期", "분석일")
+        report_time_label = _label("Report Time", "报告生成时间", "생성 시각")
+        reason_label = _label("Rationale", "操作理由", "판단 근거")
+        risk_warning_label = _label("Risk Warning", "风险提示", "리스크 경고")
+        technical_heading = _label("Technicals", "技术面", "기술적 분석")
+        ma_label = _label("Moving Averages", "均线", "이동평균")
+        volume_analysis_label = _label("Volume", "量能", "거래량")
+        news_heading = _label("News Flow", "消息面", "뉴스 흐름")
 
         # Escape markdown special characters in stock name
         name_escaped = self._escape_md(
@@ -977,7 +1003,7 @@ class HistoryService:
             report_lines.extend([
                 f"| {labels['position_status_label']} | {labels['action_advice_label']} |",
                 "|---------|---------|",
-                f"| 🆕 **{labels['no_position_label']}** | {pos_advice.get('no_position', localize_operation_advice(result.operation_advice, report_language))} |",
+                f"| 🆕 **{labels['no_position_label']}** | {pos_advice.get('no_position', self._get_display_operation_advice(result, report_language))} |",
                 f"| 💼 **{labels['has_position_label']}** | {pos_advice.get('has_position', labels['continue_holding'])} |",
                 "",
             ])
@@ -1193,12 +1219,42 @@ class HistoryService:
             return "N/A"
         return text
 
+    def _get_display_operation_advice(
+        self,
+        result: AnalysisResult,
+        report_language: Optional[str] = None,
+    ) -> str:
+        return display_operation_advice_for_result(
+            result,
+            report_language=report_language or getattr(result, "report_language", "zh"),
+        )
+
     def _get_signal_level(self, result: AnalysisResult) -> Tuple[str, str, str]:
-        """Get signal level based on sentiment score and decision type."""
-        return get_signal_level(
-            result.operation_advice,
+        """Get display text and signal metadata from the resolved action."""
+        report_language = getattr(result, "report_language", "zh")
+        display_fields = display_action_fields_for_result(
+            result,
+            report_language=report_language,
+        )
+        signal_advice = {
+            "buy": "buy",
+            "add": "buy",
+            "hold": "hold",
+            "reduce": "reduce",
+            "sell": "sell",
+            "watch": "watch",
+            "avoid": "hold",
+            "alert": "sell",
+        }.get(display_fields["action"])
+        _, emoji, signal_tag = get_signal_level(
+            signal_advice or self._get_display_operation_advice(result, report_language),
             result.sentiment_score,
-            getattr(result, "report_language", "zh"),
+            report_language,
+        )
+        return (
+            self._get_display_operation_advice(result, report_language),
+            emoji,
+            signal_tag,
         )
 
     @staticmethod
