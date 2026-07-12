@@ -31,6 +31,7 @@ from src.agent.tools.registry import ToolRegistry
 from src.report_language import normalize_report_language
 from src.market_context import get_market_role, get_market_guidelines
 from src.market_phase_prompt import format_market_phase_prompt_section
+from src.market_structure_prompt import format_market_structure_prompt_section
 from src.services.daily_market_context import format_daily_market_context_prompt_section
 
 logger = logging.getLogger(__name__)
@@ -642,6 +643,12 @@ class AgentExecutor:
             )
             if daily_market_context_section:
                 context_parts.append(daily_market_context_section.strip())
+            market_structure_section = format_market_structure_prompt_section(
+                context.get("market_structure_context"),
+                report_language=report_language,
+            )
+            if market_structure_section:
+                context_parts.append(market_structure_section.strip())
             if context_parts:
                 context_msg = "[系统提供的历史分析上下文，可供参考对比]\n" + "\n".join(context_parts)
                 messages.append({"role": "user", "content": context_msg})
@@ -818,6 +825,8 @@ class AgentExecutor:
                 parts.append(f"报告类型: {context['report_type']}")
             if report_language == "en":
                 parts.append("输出语言: English（所有 JSON 键名保持不变，所有面向用户的文本值使用英文）")
+            elif report_language == "ko":
+                parts.append("출력 언어: 한국어（모든 JSON 키는 그대로 유지하고, 사용자 노출 텍스트 값은 한국어로 작성）")
             else:
                 parts.append("输出语言: 中文（所有 JSON 键名保持不变，所有面向用户的文本值使用中文）")
 
@@ -834,6 +843,13 @@ class AgentExecutor:
             )
             if daily_market_context_section:
                 parts.append(daily_market_context_section)
+
+            market_structure_section = format_market_structure_prompt_section(
+                context.get("market_structure_context"),
+                report_language=report_language,
+            )
+            if market_structure_section:
+                parts.append(market_structure_section)
 
             analysis_context_pack_summary = context.get("analysis_context_pack_summary")
             if isinstance(analysis_context_pack_summary, str) and analysis_context_pack_summary:
